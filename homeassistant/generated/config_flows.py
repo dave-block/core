@@ -98,6 +98,7 @@ FLOWS = {
         "directv",
         "discord",
         "discovergy",
+        "distech_hvac",
         "dlink",
         "dlna_dmr",
         "dlna_dms",
