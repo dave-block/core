@@ -1,5 +1,6 @@
 # import requests
 import base64
+from datetime import datetime
 import json
 import logging
 
@@ -34,7 +35,6 @@ def distechMessageToBacnetProperty(message):
 
 
 class bacnetProperty:
-    # def __init__(self, valueType : str, valueInstance : int, propertyName : str, value = None, priority = -1, arrayIndex = -1):
     def __init__(
         self,
         property_type: str,
@@ -57,11 +57,16 @@ class bacnetProperty:
         self.writeValue = self.propertyValue
         self.static = static
         self.update_required = update_required
+        self.write_required = False
 
     def _set_value(self, value):
-        if self.propertyName == "propertyList" and value is not None:
+        if (
+            self.propertyName == "propertyList"
+            and value is not None
+            and type(value) is str
+        ):
             self.propertyValue = [
-                f"{x[0].lower()}{x[1:].replace(' ', '')}"
+                f"{x[0].lower()}{x[1:].replace(' ', '')}".strip()
                 for x in value.strip("{}").split(",")
             ]
         else:
@@ -80,29 +85,33 @@ class bacnetProperty:
         }
 
     def update(self, value):
-        if not self.static or self.update_required:
-            self.writeValue = value
+        self.writeValue = value
+        self.write_required = True
 
     def request_read(self):
-        if self.static:
-            self.update_required = False
-        return {
-            "type": self.objectType,
-            "instance": self.objectInstance,
-            "property": self.propertyName,
-            "arrayIndex": self.arrayIndex,
-        }
+        if self.update_required:
+            if self.static:
+                self.update_required = False
+            return {
+                "type": self.objectType,
+                "instance": self.objectInstance,
+                "property": self.propertyName,
+                "arrayIndex": self.arrayIndex,
+            }
+        return None
 
     def request_write(self):
-        self.propertyValue = self.writeValue
-        # TODO: using this as a way to indicate that a value was written is not great
-        return {
-            "type": self.objectType,
-            "instance": self.objectInstance,
-            "property": self.propertyName,
-            "priority": self.arrayIndex,
-            "value": self.writeValue,
-        }
+        if self.write_required:
+            self.propertyValue = self.writeValue
+            self.write_required = False
+            return {
+                "type": self.objectType,
+                "instance": self.objectInstance,
+                "property": self.propertyName,
+                "priority": self.priority,
+                "value": self.writeValue,
+            }
+        return None
 
 
 class bacnetObject:
@@ -127,22 +136,43 @@ class bacnetObject:
         else:
             self.href = href
         if not properties:
-            properties = ["objectName", "description", "presentValue"]
+            properties = {
+                "propertyList": {
+                    "property_type": self.type,
+                    "instance": self.index,
+                    "property_name": "propertyList",
+                    "static": True,
+                },
+                "objectName": {
+                    "property_type": self.type,
+                    "instance": self.index,
+                    "property_name": "objectName",
+                    "static": True,
+                },
+                "description": {
+                    "property_type": self.type,
+                    "instance": self.index,
+                    "property_name": "description",
+                    "static": True,
+                },
+            }
+            # properties = ["objectName", "description", "presentValue"]
         self.bacnet_properties = {}
         for x in properties:
-            self.bacnet_properties[x] = bacnetProperty(self.type, self.index, x)
+            self.bacnet_properties[x] = bacnetProperty(**properties[x])
 
     def initProperties(self, prop_dict: dict["str"]):
         for pname in prop_dict:
             self.addBacnetProperty(prop_dict[pname])
 
-    def makePropertWriteRequest(self, properties: list | None = None):
+    def makePropertyWriteRequest(self, properties: list | None = None):
         request = []
         for bacnet_property in self.bacnet_properties.values():
             if properties is not None and bacnet_property.propertyName in properties:
                 request.append(bacnet_property.request_write())
-            elif bacnet_property.update_required or not bacnet_property.static:
-                request.append(bacnet_property.request_write())
+            else:  # bacnet_property.update_required or not bacnet_property.static:
+                if (msg := bacnet_property.request_write()) is not None:
+                    request.append(msg)
         return request
 
     def makePropertyReadRequest(
@@ -155,9 +185,11 @@ class bacnetObject:
             if (
                 properties is not None and get_all
             ):  # bacnet_property.propertyName in properties:
-                request.append(bacnet_property.request_read())
+                if (msg := bacnet_property.request_read()) is not None:
+                    request.append(msg)
             elif bacnet_property.update_required or not bacnet_property.static:
-                request.append(bacnet_property.request_read())
+                if (msg := bacnet_property.request_read()) is not None:
+                    request.append(msg)
         return request
 
     def addBacnetProperty(self, bacnet_property: dict["str"]):
@@ -210,7 +242,8 @@ class eclypseCtrl:
             + "/{objtype}/{objId}/trend?bySequenceNumber=true&start={startIdx}&end={endIdx}"
         )
         self.bacnet_obj_single = self.bacnet_root + "/{objtype}/{objId}"
-
+        self.request_volume = 0
+        self.request_time = 0
         self._session = aiohttp.ClientSession()
 
     def export(self):
@@ -265,6 +298,8 @@ class eclypseCtrl:
 
     async def postJson(self, endpoint: str, content: dict) -> (dict | None):
         """Perform HTTP POST at the endpoint or endpoint fragment provided. Content is expected to be formatted appropriately already."""
+        if "write" in endpoint:
+            self.logger.info(f"post request content: {content}")
         return await self.parseHttpResult(
             await self._session.post(
                 self._prepare_url(endpoint),
@@ -282,7 +317,7 @@ class eclypseCtrl:
             return json.loads(await result.content.read())
         else:
             self.logger.error(
-                f"Received HTTP error response code and message {result.status}: {result.content}"
+                f"Received HTTP error response code and message {result.status}: {await result.content.read()}"
             )
 
     async def updateObjectData(self):
@@ -328,7 +363,7 @@ class eclypseCtrl:
                 bacnetObjects[rawObject["name"]] = bacnetObject(
                     rawObject["name"],
                     None,
-                    ["propertyList", "objectName", "description"],
+                    None,
                 )
         return bacnetObjects
 
@@ -347,15 +382,20 @@ class eclypseCtrl:
             objects = self.bacnet_objects
         for obj in objects.values():
             content += obj.makePropertyReadRequest(properties, get_all)
+
         if content:
-            self.logger.debug(
-                f"Requesting {len(content)} values from the controller, {content}"
-            )
+            self.logger.debug(f"Requesting {len(content)} values from the controller")
+            self.logger.debug(f"request: {content}")
+            start = datetime.now()
             result = await self.postJson(
                 endpoint=f"{self.bacnet_root}/read-property-multiple",
                 content={"encode": "text", "propertyReferences": content},
             )
-            # self.logger.info(result)
+            # self.logger.info(
+            #    f"Requested {len(content)} values. Execution time was {(datetime.now() - start).total_seconds()}"
+            # )
+            self.request_volume = len(content)
+            self.request_time = (datetime.now() - start).total_seconds()
             self.readJsonIntoObjects(result)
             return result
         return {}

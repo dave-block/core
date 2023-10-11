@@ -13,7 +13,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from .async_hvac import bacnetObject, eclypseCtrl
 from .const import DOMAIN
 
-PLATFORMS: list[Platform] = [Platform.CLIMATE, Platform.SENSOR]
+PLATFORMS: list[Platform] = [Platform.CLIMATE, Platform.SENSOR, Platform.BINARY_SENSOR]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -46,7 +46,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN] = {
         "api": api,
         "coordinator": coordinator,
-        "device": DeviceInfo(  # TODO: add the rest of the device info to this structure (hw/sw versions etc)
+        "device": DeviceInfo(
             identifiers={(DOMAIN, "controller")},
             name=entry.data["device_info"]["hostName"],
             manufacturer="Distech",

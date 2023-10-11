@@ -159,16 +159,24 @@ class DistechEntity(CoordinatorEntity, ClimateEntity):
         return self._attr_occupancy_status
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
-        # self._attr_preset_mode = preset_mode
-        self._update_required = True
         if preset_mode == PRESET_HOME:
             self._attr_occupancy_status = 1
         elif preset_mode == PRESET_AWAY:
             self._attr_occupancy_status = 2
         elif preset_mode == PRESET_ECO:
             self._attr_occupancy_status = 4
-        else:
-            self._update_required = False
+        self._objmap["occupancystatus"].bacnet_properties["presentValue"].priority = 15
+        self._objmap["occupancystatus"].bacnet_properties["presentValue"].update(
+            str(self._attr_occupancy_status)
+        )
+        if (
+            msg := self._objmap["occupancystatus"].makePropertyWriteRequest()
+        ) is not None:
+            logging.getLogger("distech_hvac").info(f"writing property {msg}")
+            await self._api.postJson(
+                f"{self._api.bacnet_root}/write-property-multiple",
+                content={"encode": "text", "propertyReferences": msg},
+            )
         await self._coordinator.async_request_refresh()
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
