@@ -1,4 +1,3 @@
-from datetime import timedelta
 import logging
 from typing import Any, final
 
@@ -22,7 +21,6 @@ from homeassistant.components.climate.const import (
     PRESET_ECO,
     PRESET_HOME,
 )
-
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, STATE_OFF, STATE_ON, UnitOfTemperature
 from homeassistant.core import HomeAssistant
@@ -34,7 +32,7 @@ from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
 )
 
-from .async_hvac import bacnetObject, eclypseCtrl
+from .async_hvac import eclypseCtrl
 from .const import DOMAIN
 
 

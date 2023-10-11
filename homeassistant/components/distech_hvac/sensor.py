@@ -1,7 +1,3 @@
-from datetime import timedelta
-import logging
-from typing import Any, final
-
 # from homeassistant.components.sensor import (
 #    ClimateEntity,
 #    ClimateEntityFeature,
@@ -13,7 +9,6 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
 from homeassistant.const import (
     CONCENTRATION_PARTS_PER_MILLION,
     PERCENTAGE,
@@ -21,13 +16,10 @@ from homeassistant.const import (
     UnitOfPower,
     UnitOfTemperature,
 )
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.temperature import display_temp as show_temp
-from homeassistant.helpers.update_coordinator import (
-    CoordinatorEntity,
-    DataUpdateCoordinator,
-)
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .async_hvac import bacnetObject, eclypseCtrl
 from .const import DOMAIN

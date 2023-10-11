@@ -1,21 +1,17 @@
 """The distech-hvac integration."""
 from __future__ import annotations
 
+from datetime import timedelta
+import logging
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-
-from .const import DOMAIN
-from .async_hvac import eclypseCtrl, bacnetObject
-
-import logging
-from datetime import timedelta
-
-from homeassistant.helpers.update_coordinator import (
-    CoordinatorEntity,
-    DataUpdateCoordinator,
-)
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+
+from .async_hvac import bacnetObject, eclypseCtrl
+from .const import DOMAIN
 
 PLATFORMS: list[Platform] = [Platform.CLIMATE, Platform.SENSOR]
 
