@@ -175,9 +175,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.info(f"adding property {prop} to {self.objname}")
                 self.api.bacnet_objects[self.objname].addBacnetProperty(
                     {
-                        "type": self.objname.split("_")[0],
+                        "property_type": self.objname.split("_")[0],
                         "instance": self.objname.split("_")[1],
-                        "property": prop,
+                        "property_name": prop,
                         "static": False,
                         "update_required": True,
                     }

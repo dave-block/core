@@ -22,11 +22,7 @@ from homeassistant.components.climate.const import (
     PRESET_ECO,
     PRESET_HOME,
 )
-from homeassistant.components.sensor import (
-    SensorDeviceClass,
-    SensorEntity,
-    SensorStateClass,
-)
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, STATE_OFF, STATE_ON, UnitOfTemperature
 from homeassistant.core import HomeAssistant
@@ -52,81 +48,15 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ):
     # logging.getLogger("distech").info(entry.data)
-    api = eclypseCtrl(
-        entry.data["ip"],
-        entry.data["creds"],
-        hass,
-    )
-
-    for obj in entry.data["objects"]:
-        api.bacnet_objects[obj] = bacnetObject(**entry.data["objects"][obj])
-
-    async def async_update_data():
-        data = await api.postRequestObjectProperties()
-        return data
-
-    coordinator = DataUpdateCoordinator(
-        hass,
-        logging.getLogger("distech"),
-        name="distech",
-        update_method=async_update_data,
-        update_interval=timedelta(seconds=30),
-    )
-
-    # api.bacnet_objects = await api.getObjectData()
-
-    await coordinator.async_refresh()
+    api = hass.data[DOMAIN]["api"]
+    coordinator = hass.data[DOMAIN]["coordinator"]
+    device = hass.data[DOMAIN]["device"]
 
     async_add_entities(
         [
-            DistechEntity(
-                coordinator,
-                api,
-                entry.data["device_info"],
-                "Thermostat",
-            ),
-            DistechCO2SensorEntity(
-                entry.data["device_info"], coordinator, api, "RoomCO2"
-            ),
+            DistechEntity(coordinator, api, entry.data["device_info"], device),
         ]
     )
-
-
-class DistechCO2SensorEntity(CoordinatorEntity, SensorEntity):
-    _attr_has_entity_name = True
-    _attr_name = "Distech CO2 Sensor"
-    _attr_device_class = SensorDeviceClass.CO2
-    _attr_state_class = SensorStateClass.MEASUREMENT
-
-    def __init__(self, device_info, coordinator, api, sensorname: str):
-        super().__init__(coordinator)
-        self._api = api
-        self._coordinator = coordinator
-        self.sensorname = sensorname
-        self._prop = None
-        self._attr_native_unit_of_measurement = "ppm"
-        for x in self._api.bacnet_objects.values():
-            logging.getLogger("co2sensor").info(
-                x.bacnet_properties.get("objectName").propertyValue
-            )
-            if x.bacnet_properties.get("objectName").propertyValue == self.sensorname:
-                self._prop = x.bacnet_properties.get("presentValue")
-
-        self._attr_unique_id = f"{device_info['hostName']}_co2_sensor"
-        """self._attr_device_info = DeviceInfo(  # TODO: add the rest of the device info to this structure (hw/sw versions etc)
-            identifiers={(DOMAIN, "co2_sensor")},
-            name=device_info["hostName"],
-            manufacturer="Distech",
-            model=device_info["modelName"],
-            sw_version=device_info["softwareVersion"],
-        )"""
-
-    @property
-    def native_value(self) -> float:
-        if self._prop:
-            return self._prop.propertyValue
-        else:
-            return None
 
 
 class DistechEntity(CoordinatorEntity, ClimateEntity):
@@ -138,11 +68,11 @@ class DistechEntity(CoordinatorEntity, ClimateEntity):
         self,
         coordinator: DataUpdateCoordinator,
         api: eclypseCtrl,
-        device_info: str,
-        sensor: str,
+        device_info: dict[str],
+        device: DeviceInfo,
     ) -> None:
         # self.name = name
-        self._attr_name = sensor
+        self._attr_name = "Thermostat"
         super().__init__(coordinator)
         self._coordinator = coordinator
         self._api = api
@@ -156,14 +86,8 @@ class DistechEntity(CoordinatorEntity, ClimateEntity):
             HVACMode.HEAT_COOL,
         ]
         self._attr_hvac_mode = HVACMode.OFF
-        self._attr_unique_id = f"{device_info['hostName']}_{sensor}"
-        self._attr_device_info = DeviceInfo(  # TODO: add the rest of the device info to this structure (hw/sw versions etc)
-            identifiers={(DOMAIN, sensor)},
-            name=device_info["hostName"],
-            manufacturer="Distech",
-            model=device_info["modelName"],
-            sw_version=device_info["softwareVersion"],
-        )
+        self._attr_unique_id = f"{device_info['hostName']}_Thermostat"
+        self._attr_device_info = device
         self._attr_supported_features |= (
             ClimateEntityFeature.TARGET_TEMPERATURE_RANGE
             | ClimateEntityFeature.PRESET_MODE
@@ -176,52 +100,64 @@ class DistechEntity(CoordinatorEntity, ClimateEntity):
         self._attr_occupancy_status = None
         self._update_required = False
 
+        self._objmap = {
+            "roomtemperature": None,
+            "roomhumidity": None,
+            "occupancystatus": None,
+        }
+        for objectName in self._objmap:
+            for bacnetObject in self._api.bacnet_objects.values():
+                if (
+                    bacnetObject.bacnet_properties["objectName"].propertyValue.lower()
+                    == objectName
+                ):
+                    self._objmap[objectName] = bacnetObject
+
     @property
     def temperature_unit(self) -> str:
         """Return the unit of measurement used by the platform."""
         return self._attr_temperature_unit
 
     @property
-    def current_c02(self) -> float:
-        for x in self.coordinator.data:
-            if x["instance"] == 1003 and x["property"] == "presentValue":
-                self._attr_current_c02 = float(x["value"])
-        return self._attr_current_c02
-
-    @property
     def current_humidity(self) -> float:
-        for x in self.coordinator.data:
-            if x["instance"] == 1002 and x["property"] == "presentValue":
-                self._attr_current_humidity = round(float(x["value"]))
+        self._attr_current_humidity = round(
+            float(
+                self._objmap["roomhumidity"]
+                .bacnet_properties["presentValue"]
+                .propertyValue
+            ),
+            2,
+        )
         return self._attr_current_humidity
 
     @property
     def current_temperature(self):
         """Return the current temperature."""
-        for x in self.coordinator.data:
-            if x["instance"] == 1001 and x["property"] == "presentValue":
-                self._attr_current_temperature = float(x["value"])
+        self._attr_current_temperature = float(
+            self._objmap["roomtemperature"]
+            .bacnet_properties["presentValue"]
+            .propertyValue
+        )
         return self._attr_current_temperature
 
     @property
     def preset_mode(self) -> float:
-        for x in self.coordinator.data:
-            if (
-                x["instance"] == 15
-                and x["type"] == "multiStateValue"
-                and x["property"] == "presentValue"
-            ):
-                self._attr_occupancy_status = int(x["value"])
-        if self._attr_occupancy_status == 1:
+        if self.occupancy_status == 1:
             return PRESET_HOME
-        if self._attr_occupancy_status == 2:
+        if self.occupancy_status == 2:
             return PRESET_AWAY
-        if self._attr_occupancy_status == 4:
+        if self.occupancy_status == 4:
             return PRESET_ECO
 
     @property
     def occupancy_status(self):
-        self.preset_mode
+        if not self._objmap.get("occupancystatus"):
+            return None
+        self._attr_occupancy_status = int(
+            self._objmap["occupancystatus"]
+            .bacnet_properties["presentValue"]
+            .propertyValue
+        )
         return self._attr_occupancy_status
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
@@ -251,35 +187,6 @@ class DistechEntity(CoordinatorEntity, ClimateEntity):
         if (low := kwargs.get(ATTR_TARGET_TEMP_LOW)) is not None:
             self._attr_target_temperature_low = low
         await self._coordinator.async_request_refresh()
-
-    """async def async_update(self) -> None:
-        if not self._authed:
-            await self.hass.async_add_executor_job(
-                self._control_object.get, "info/device"
-            )
-            self._authed = True
-
-        if self._update_required:
-            await self.hass.async_add_executor_job(
-                self._control_object.postSetObjectProperties,
-                "multiStateValue_15",
-                {"presentValue": self._attr_occupancy_status},
-            )
-            self._update_required = False
-        res = await self.hass.async_add_executor_job(
-            self._control_object.postRequestObjectProperties
-        )
-        for x in res:
-            if x["instance"] == 1001:
-                self._attr_current_temperature = float(x["value"])
-            elif x["instance"] == 1002:
-                self._attr_current_humidity = round(float(x["value"]))
-            elif x["instance"] == 1003:
-                self._attr_current_c02 = float(x["value"])
-            elif x["instance"] == 15 and x["type"] == "multiStateValue":
-                self._attr_occupancy_status = int(x["value"])
-        logging.getLogger("distech").info(res)
-    """
 
     @final
     @property
@@ -312,11 +219,9 @@ class DistechEntity(CoordinatorEntity, ClimateEntity):
                 hass, self.target_temperature_low, temperature_unit, precision
             )
 
-        data["current_c02"] = self.current_c02
         data["occupancy"] = self.occupancy_status
 
         for x in self._api.bacnet_objects:
-            # logging.getLogger('distech').
             res = self._api.bacnet_objects[x].bacnet_properties.get("presentValue")
             logging.getLogger("distech").debug(f"{x}: {res.propertyValue}")
             if res:

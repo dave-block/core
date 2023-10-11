@@ -18,6 +18,21 @@ typeToUrl = {
 }
 
 
+def distechMessageToBacnetProperty(message):
+    rdict = {
+        "property_type": message["type"],
+        "instance": message["instance"],
+        "property_name": message["property"],
+    }
+    if message.get("value"):
+        rdict["value"] = message.get("value")
+    if message.get("priority"):
+        rdict["priority"] = message.get("priority")
+    if message.get("arrayIndex"):
+        rdict["arrayIndex"] = message.get("arrayIndex")
+    return rdict
+
+
 class bacnetProperty:
     # def __init__(self, valueType : str, valueInstance : int, propertyName : str, value = None, priority = -1, arrayIndex = -1):
     def __init__(
@@ -54,9 +69,9 @@ class bacnetProperty:
 
     def export(self):
         return {
-            "type": self.objectType,
+            "property_type": self.objectType,
             "instance": self.objectInstance,
-            "property": self.propertyName,
+            "property_name": self.propertyName,
             "value": self.propertyValue,
             "priority": self.priority,
             "arrayIndex": self.arrayIndex,
@@ -146,7 +161,7 @@ class bacnetObject:
         return request
 
     def addBacnetProperty(self, bacnet_property: dict["str"]):
-        self.bacnet_properties[bacnet_property["property"]] = bacnetProperty(
+        self.bacnet_properties[bacnet_property["property_name"]] = bacnetProperty(
             **bacnet_property
         )
 
@@ -283,7 +298,11 @@ class eclypseCtrl:
         """Request all Bacnet objects at all endpoints."""
         bacnetObjects = await self.getRawObjectData()
         for propertyResult in await self.postRequestObjectProperties(bacnetObjects):
-            prop = bacnetProperty(static=True, update_required=False, **propertyResult)
+            prop = bacnetProperty(
+                static=True,
+                update_required=False,
+                **distechMessageToBacnetProperty(propertyResult),
+            )
             self.logger.debug(prop)
             bacnetObjects[prop.objectName].bacnet_properties[prop.propertyName] = prop
         return bacnetObjects
@@ -346,13 +365,15 @@ class eclypseCtrl:
         for prop in message:
             self.logger.debug(f"Reading into objects: {prop}")
             instance = prop["instance"]
-            key = prop["property"]
+            # kp = prop["property"]
             value = prop["value"]
             for obj in self.bacnet_objects:
                 if obj == f"{prop['type']}_{instance}":
-                    self.logger.debug(f"matched {obj}, setting key {key} = {value}")
+                    self.logger.debug(
+                        f"matched {obj}, setting key {prop['property']} = {value}"
+                    )
                     self.bacnet_objects[obj].bacnet_properties[
-                        key
+                        prop["property"]
                     ].propertyValue = value
                     break
 
